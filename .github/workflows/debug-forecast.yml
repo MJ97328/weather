@@ -1,0 +1,22 @@
+name: Debug font URLs (temporary)
+on: workflow_dispatch
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          for U in \
+            "https://cdn.jsdelivr.net/gh/sun-typeface/SUIT@2/fonts/variable/woff2/SUIT-Variable.css" \
+            "https://cdn.jsdelivr.net/gh/spoqa/spoqa-han-sans@latest/css/SpoqaHanSansNeo.css" \
+            "https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_2001@1.1/GmarketSansLight.woff" \
+            "https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_2001@1.1/GmarketSansMedium.woff" \
+            "https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_2001@1.1/GmarketSansBold.woff" \
+            "https://fonts.googleapis.com/css2?family=Inter:wght@300..700&family=IBM+Plex+Sans+KR:wght@300;400;500;600;700&display=swap" \
+            "https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css"; do
+            echo "$(curl -s -o /tmp/f -w '%{http_code} %{size_download}' "$U") $U"
+            case "$U" in *.css*) grep -o "font-family:[^;]*" /tmp/f | sort -u | head -3; grep -o 'url([^)]*)' /tmp/f | head -1;; esac
+          done
+          # the first woff2 referenced by SUIT css
+          SUITF=$(curl -s "https://cdn.jsdelivr.net/gh/sun-typeface/SUIT@2/fonts/variable/woff2/SUIT-Variable.css" | grep -o "url([^)]*)" | head -1 | sed -E "s/url\(['\"]?([^'\")]*)['\"]?\)/\1/")
+          echo "SUIT font ref: $SUITF"
+          case "$SUITF" in http*) curl -s -o /dev/null -w '%{http_code}\n' "$SUITF";; *) curl -s -o /dev/null -w '%{http_code}\n' "https://cdn.jsdelivr.net/gh/sun-typeface/SUIT@2/fonts/variable/woff2/$SUITF";; esac

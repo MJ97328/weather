@@ -27,7 +27,7 @@ jobs:
           enablement: true
       - name: Collect site files
         run: |
-          mkdir _site && cp index.html app.js style.css _site/
+          mkdir _site && cp index.html app.js style.css fonts.html _site/
           # 배포마다 새 파일을 받도록 캐시 무효화용 버전 붙이기
           sed -i "s/app.js\"/app.js?v=${GITHUB_SHA::7}\"/; s/style.css\"/style.css?v=${GITHUB_SHA::7}\"/" _site/index.html
       - uses: actions/upload-pages-artifact@v3
