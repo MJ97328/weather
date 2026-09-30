@@ -19,12 +19,11 @@
   --r-md: 24px;
   --r-full: 9999px;
 
-  --font: "SUIT Variable", SUIT, -apple-system, "Apple SD Gothic Neo", "Helvetica Neue", Arial, sans-serif;
+  --font: "Inter", "Pretendard Variable", Pretendard, -apple-system, "Helvetica Neue", Arial, sans-serif;
   --w-head: 650;
   --w-body: 450;
   --w-light: 300;
 }
-html.font-spoqa { --font: "Spoqa Han Sans Neo", -apple-system, "Apple SD Gothic Neo", "Helvetica Neue", Arial, sans-serif; }
 @media (prefers-color-scheme: dark) {
   :root {
     --primary: #f2f2f2;
