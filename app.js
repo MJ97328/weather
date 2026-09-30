@@ -75,27 +75,39 @@ async function searchNominatim(q) {
     q, format: "jsonv2", addressdetails: 1, limit: 8, "accept-language": "ko",
   })}`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  let rows = await res.json();
-  // 지명(행정구역·마을 등)이 있으면 역·도로·가게 같은 결과는 뺀다
-  const places = rows.filter((r) => r.category === "boundary" || r.category === "place");
-  if (places.length) rows = places;
-  const seen = new Set();
-  return rows.map((r) => {
+  const rows = await res.json();
+  // 순위: ① 이름이 검색어와 같은 결과 > 검색어가 들어간 결과 ② 중요도(큰 도시일수록 높음) + 지명(행정구역·마을)이면 가산점
+  //  - "무주" → 인도네시아 Muja muju보다 무주읍이 먼저
+  //  - "도쿄" → 두바이의 작은 섬(지명)보다 도쿄역(중요도 높음)이 먼저
+  const score = (r) => (r.importance || 0) + (r.category === "boundary" || r.category === "place" ? 0.1 : 0);
+  const matches = (r) => ((r.name || "") === q ? 2 : (r.name || "").includes(q) ? 1 : 0); // 정확히 같으면 우선
+  rows.sort((a, b) => (matches(b) - matches(a)) || (score(b) - score(a)));
+
+  const out = [];
+  for (const r of rows) {
     const a = r.address || {};
-    return {
+    const p = {
       name: r.name || r.display_name.split(",")[0],
       latitude: Number(r.lat),
       longitude: Number(r.lon),
       admin1: a.state || a.province || a.city || "",
       country: a.country || "",
     };
-  }).filter((p) => {
-    const key = `${p.name}|${p.admin1}|${p.country}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+    // 20km 안에 이미 더 앞선 결과가 있으면 같은 곳으로 보고 뺌 (역·식당·극장 등 중복)
+    if (out.some((o) => distanceKm(o, p) < 20)) continue;
+    out.push(p);
+  }
+  return out;
 }
+
+function distanceKm(a, b) {
+  const R = 6371, rad = Math.PI / 180;
+  const dLat = (b.latitude - a.latitude) * rad;
+  const dLon = (b.longitude - a.longitude) * rad;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.latitude * rad) * Math.cos(b.latitude * rad) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
 
 // ---- 2) 단기 예보 (오늘 ~ 15일 뒤) + 현재 날씨 + 시간별 ----
 async function shortForecast(place) {
