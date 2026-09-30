@@ -239,8 +239,15 @@ function describeCode(code) {
   return null;
 }
 
+// 모델의 날씨 코드는 0.1mm 정도의 아주 약한 비에도 비/눈 코드가 나와서,
+// 하루 강수량이 적고 확률도 낮으면 흐림으로 보여준다.
+const isPrecipCode = (c) => (c >= 51 && c <= 67) || (c >= 71 && c <= 77) || (c >= 80 && c <= 86);
+
 function describe(day) {
   if (day.code != null) {
+    if (isPrecipCode(day.code) && (day.precip ?? 0) < 1 && (day.rainChance ?? 0) < 0.5) {
+      return (day.precip ?? 0) > 0 ? ["☁️", "흐림, 빗방울 가능"] : ["☁️", "흐림"];
+    }
     const r = describeCode(day.code);
     if (r) return r;
   }
