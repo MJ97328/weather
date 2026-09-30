@@ -20,3 +20,8 @@ python3 -m http.server 8000   # http://localhost:8000
 
 비 올 확률은 앙상블 멤버(또는 과거 연도) 중 강수량 1mm 이상인 비율입니다.
 한 달 뒤 예보는 불확실성이 크므로 참고용으로 사용하세요.
+
+## 배포
+
+`master`에 push하면 GitHub Actions(`.github/workflows/pages.yml`)가 GitHub Pages로 자동 배포합니다.
+주소: https://mj97328.github.io/weather/
