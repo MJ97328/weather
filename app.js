@@ -1,5 +1,6 @@
 // 한 달 뒤 날씨 — Open-Meteo API (API 키 불필요)
 const GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search";
+const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"; // 한글 지명 검색 대체용
 const SEASONAL_URL = "https://seasonal-api.open-meteo.com/v1/seasonal";
 const ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive";
 
@@ -35,9 +36,35 @@ async function getJSON(url, params) {
 const mean = (xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
 
 // ---- 1) 장소 검색 ----
+// Open-Meteo 지오코딩은 "서울" 같은 한글 이름을 잘 못 찾으므로,
+// 결과가 없으면 OpenStreetMap Nominatim으로 다시 검색한다.
 async function searchPlaces(name) {
-  const data = await getJSON(GEOCODING_URL, { name, count: 8, language: "ko", format: "json" });
-  return data.results || [];
+  let results = [];
+  try {
+    const data = await getJSON(GEOCODING_URL, { name, count: 8, language: "ko", format: "json" });
+    results = data.results || [];
+  } catch (e) {
+    console.warn("Open-Meteo 지오코딩 실패:", e);
+  }
+  return results.length ? results : searchNominatim(name);
+}
+
+async function searchNominatim(q) {
+  const res = await fetch(`${NOMINATIM_URL}?${new URLSearchParams({
+    q, format: "jsonv2", addressdetails: 1, limit: 8, "accept-language": "ko",
+  })}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const rows = await res.json();
+  return rows.map((r) => {
+    const a = r.address || {};
+    return {
+      name: r.name || r.display_name.split(",")[0],
+      latitude: Number(r.lat),
+      longitude: Number(r.lon),
+      admin1: a.state || a.province || a.city || "",
+      country: a.country || "",
+    };
+  });
 }
 
 // ---- 2) 계절 예측(앙상블) ----
