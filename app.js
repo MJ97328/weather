@@ -73,8 +73,34 @@ async function searchNominatim(q) {
 }
 
 // ---- 2) 단기 예보 (오늘 ~ 15일 뒤) + 현재 날씨 + 시간별 ----
+// 한국 안에서는 기상청(KMA) 모델 값을 우선 쓰고, 비어 있는 값(모델 범위를 넘는 날짜,
+// 강수 확률 등)은 기본(best match) 예보로 채운다.
+const isKorea = (p) => p.latitude >= 33 && p.latitude <= 38.7 && p.longitude >= 124.5 && p.longitude <= 131;
+
+function preferFirst(primary, fallback) {
+  if (!primary) return fallback;
+  for (const section of ["daily", "hourly"]) {
+    const a = primary[section];
+    const b = fallback[section];
+    if (!a || !b) continue;
+    const index = new Map(a.time.map((t, i) => [t, i]));
+    for (const key of Object.keys(b)) {
+      if (key === "time") continue;
+      b[key] = b[key].map((v, i) => {
+        const j = index.get(b.time[i]);
+        const pv = j == null || !a[key] ? null : a[key][j];
+        return pv ?? v;
+      });
+    }
+  }
+  if (primary.current && fallback.current) {
+    for (const [k, v] of Object.entries(primary.current)) if (v != null) fallback.current[k] = v;
+  }
+  return fallback;
+}
+
 async function shortForecast(place) {
-  const data = await getJSON(FORECAST_URL, {
+  const params = {
     latitude: place.latitude,
     longitude: place.longitude,
     current: "temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m",
@@ -84,7 +110,16 @@ async function shortForecast(place) {
     forecast_days: SHORT_DAYS,
     wind_speed_unit: "ms",
     timezone: "auto",
-  });
+  };
+  const [base, kma] = await Promise.allSettled([
+    getJSON(FORECAST_URL, params),
+    isKorea(place) ? getJSON(FORECAST_URL, { ...params, models: "kma_seamless" }) : Promise.reject(new Error("국외")),
+  ]);
+  if (base.status === "rejected") throw base.reason;
+  if (kma.status === "rejected" && isKorea(place)) console.warn("기상청 모델 실패:", kma.reason);
+  const data = preferFirst(kma.status === "fulfilled" ? kma.value : null, base.value);
+  data.usedKMA = kma.status === "fulfilled";
+
   const d = data.daily;
   const h = data.hourly;
   const hourly = h.time.map((time, i) => ({
@@ -109,7 +144,7 @@ async function shortForecast(place) {
     hourly: hourly.filter((x) => x.time.startsWith(date)),
   })).filter((x) => x.tmax != null && x.tmin != null);
 
-  return { days, current: data.current, hourly };
+  return { days, current: data.current, hourly, usedKMA: data.usedKMA };
 }
 
 // ---- 3) 장기 예측: 계절 예측(앙상블) ----
@@ -436,7 +471,8 @@ async function loadForecast(place) {
   }
 
   $("place-name").textContent = placeLabel(place);
-  $("source").textContent = `${formatKo(days[0].date)} ~ ${formatKo(days[days.length - 1].date)}`;
+  $("source").textContent = `${formatKo(days[0].date)} ~ ${formatKo(days[days.length - 1].date)}`
+    + (short.usedKMA ? " · 기상청(KMA) 모델 기반" : "");
   renderToday(sd[0], short.current, short.hourly);
   renderMonth(days);
   selectTab(short.current ? "today" : "month");

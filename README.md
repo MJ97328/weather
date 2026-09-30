@@ -18,7 +18,7 @@ python3 -m http.server 8000   # http://localhost:8000
 | 용도 | API |
 | --- | --- |
 | 장소 검색 → 위도/경도 | [Open-Meteo Geocoding API](https://open-meteo.com/en/docs/geocoding-api), 결과가 없으면(한글 지명 등) [OpenStreetMap Nominatim](https://nominatim.org/release-docs/latest/api/Search/) |
-| 오늘 ~ 15일 뒤 | [Open-Meteo Forecast API](https://open-meteo.com/en/docs) (일반 일기예보) |
+| 오늘 ~ 15일 뒤 | [Open-Meteo Forecast API](https://open-meteo.com/en/docs) (일반 일기예보, 한국은 [기상청 KMA 모델](https://open-meteo.com/en/docs/kma-api) 우선) |
 | 16일 ~ 30일 뒤 | [Open-Meteo Seasonal Forecast API](https://open-meteo.com/en/docs/seasonal-forecast-api) (ECMWF 앙상블 멤버 평균) |
 | 대체(계절 예측 실패 시) | [Open-Meteo Historical Weather API](https://open-meteo.com/en/docs/historical-weather-api) — 최근 10년 같은 날짜 평균 |
 
