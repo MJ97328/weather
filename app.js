@@ -43,17 +43,31 @@ async function getJSON(url, params) {
 const mean = (xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
 
 // ---- 1) 장소 검색 ----
-// Open-Meteo 지오코딩은 "서울" 같은 한글 이름을 잘 못 찾으므로,
-// 결과가 없으면 OpenStreetMap Nominatim으로 다시 검색한다.
+// Open-Meteo 지오코딩은 한글 이름을 정확히 일치하는 작은 마을부터 찾는 경우가 많아서
+// ("부산" → 부산광역시 대신 같은 이름의 마을 4곳), 한글 검색은 OpenStreetMap Nominatim을
+// 먼저 쓰고(큰 도시가 먼저 나옴), 결과가 없을 때 다른 쪽으로 다시 검색한다.
+const hasHangul = (s) => /[\u3131-\u318e\uac00-\ud7a3]/.test(s);
+
 async function searchPlaces(name) {
-  let results = [];
-  try {
-    const data = await getJSON(GEOCODING_URL, { name, count: 8, language: "ko", format: "json" });
-    results = data.results || [];
-  } catch (e) {
-    console.warn("Open-Meteo 지오코딩 실패:", e);
+  const order = hasHangul(name) ? [searchNominatim, searchOpenMeteo] : [searchOpenMeteo, searchNominatim];
+  let lastError;
+  for (const search of order) {
+    try {
+      const results = await search(name);
+      if (results.length) return results;
+    } catch (e) {
+      console.warn("장소 검색 실패:", e);
+      lastError = e;
+    }
   }
-  return results.length ? results : searchNominatim(name);
+  if (lastError) throw lastError;
+  return [];
+}
+
+async function searchOpenMeteo(name) {
+  const data = await getJSON(GEOCODING_URL, { name, count: 8, language: "ko", format: "json" });
+  // 인구가 많은 곳(큰 도시)부터
+  return (data.results || []).sort((a, b) => (b.population || 0) - (a.population || 0));
 }
 
 async function searchNominatim(q) {
@@ -61,7 +75,11 @@ async function searchNominatim(q) {
     q, format: "jsonv2", addressdetails: 1, limit: 8, "accept-language": "ko",
   })}`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const rows = await res.json();
+  let rows = await res.json();
+  // 지명(행정구역·마을 등)이 있으면 역·도로·가게 같은 결과는 뺀다
+  const places = rows.filter((r) => r.category === "boundary" || r.category === "place");
+  if (places.length) rows = places;
+  const seen = new Set();
   return rows.map((r) => {
     const a = r.address || {};
     return {
@@ -71,6 +89,11 @@ async function searchNominatim(q) {
       admin1: a.state || a.province || a.city || "",
       country: a.country || "",
     };
+  }).filter((p) => {
+    const key = `${p.name}|${p.admin1}|${p.country}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
   });
 }
 
