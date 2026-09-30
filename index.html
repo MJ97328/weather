@@ -3,17 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>한 달 뒤 날씨</title>
+<title>한 달 날씨</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <main>
-  <h1>한 달 뒤 날씨</h1>
-  <p class="sub">장소를 검색하면 약 한 달 뒤의 날씨 예측을 보여줍니다.</p>
+  <h1>한 달 날씨</h1>
+  <p class="sub">장소를 검색하면 오늘부터 한 달 뒤까지 매일의 날씨를 보여줍니다.</p>
 
   <form id="search-form" autocomplete="off">
     <input id="query" type="search" placeholder="도시 또는 장소 (예: 서울, 부산, Tokyo)" required>
-    <input id="target-date" type="date" title="예측할 날짜">
     <button type="submit">검색</button>
   </form>
 
@@ -23,11 +22,10 @@
   <section id="forecast" hidden>
     <h2 id="place-name"></h2>
     <p id="source" class="source"></p>
-    <div id="target-card" class="card"></div>
-    <h3>전후 날짜</h3>
+    <div id="summary" class="summary"></div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>날짜</th><th>날씨</th><th>최고</th><th>최저</th><th>강수량</th></tr></thead>
+        <thead><tr><th>날짜</th><th>날씨</th><th>최고 / 최저</th><th>비</th></tr></thead>
         <tbody id="days"></tbody>
       </table>
     </div>
@@ -35,8 +33,8 @@
 
   <footer>
     데이터: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>, 장소 검색 <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap</a>
-    (장기 예측: ECMWF 계절 예측 앙상블 평균 · 대체: 과거 10년 평년값).
-    한 달 뒤 예보는 불확실성이 크므로 참고용으로만 사용하세요.
+    (16일까지: 일반 예보 · 이후: ECMWF 계절 예측 앙상블 평균, 실패 시 과거 10년 평년값).
+    2주 이후 예측은 불확실성이 크므로 참고용으로만 사용하세요.
   </footer>
 </main>
 <script src="app.js"></script>

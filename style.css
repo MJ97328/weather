@@ -54,22 +54,32 @@ button { background: var(--accent); color: #fff; border-color: var(--accent); cu
 .status.error { color: var(--hot); }
 
 .source { color: var(--muted); font-size: 0.9rem; margin-top: -8px; }
-.card {
-  display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
-  background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px;
+.summary {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px;
+  margin-bottom: 16px;
 }
-.card .icon { font-size: 3.5rem; line-height: 1; }
-.card .date { color: var(--muted); }
-.card .desc { font-size: 1.3rem; font-weight: 600; }
-.card .temps { font-size: 1.1rem; }
+.summary > div {
+  background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px;
+}
+.summary .label { display: block; color: var(--muted); font-size: 0.8rem; }
+.summary .value { font-size: 1.3rem; font-weight: 600; }
 .hi { color: var(--hot); }
 .lo { color: var(--cold); }
 
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 8px; }
-th, td { padding: 8px 10px; text-align: left; border-top: 1px solid var(--border); white-space: nowrap; }
+th, td { padding: 8px 6px; text-align: left; border-top: 1px solid var(--border); white-space: nowrap; }
+th:first-child, td:first-child { padding-left: 10px; }
+td:nth-child(2) { white-space: normal; word-break: keep-all; }
+td:last-child, th:last-child { text-align: right; padding-right: 10px; }
 thead th { border-top: 0; color: var(--muted); font-weight: 500; }
-tr.target { background: color-mix(in srgb, var(--accent) 12%, transparent); font-weight: 600; }
+td small { display: block; color: var(--muted); font-size: 0.75rem; }
+.ic { display: inline-block; width: 1.4em; text-align: center; }
+tr.sep td {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--muted); font-size: 0.85rem; white-space: normal;
+}
+tr.long td, tr.normal td { color: color-mix(in srgb, var(--fg) 80%, transparent); }
 
 footer { margin-top: 32px; color: var(--muted); font-size: 0.85rem; }
 footer a { color: var(--accent); }
