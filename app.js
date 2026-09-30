@@ -2,6 +2,8 @@
 const GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search";
 const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"; // 한글 지명 검색 대체용
 const FORECAST_URL = "https://api.open-meteo.com/v1/forecast";
+// 기상청 프록시(Cloudflare Worker) 주소. 비어 있으면 기상청 예보 없이 동작한다. (worker/README.md 참고)
+const KMA_PROXY_URL = "";
 const SEASONAL_URL = "https://seasonal-api.open-meteo.com/v1/seasonal";
 const ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive";
 
@@ -73,34 +75,8 @@ async function searchNominatim(q) {
 }
 
 // ---- 2) 단기 예보 (오늘 ~ 15일 뒤) + 현재 날씨 + 시간별 ----
-// 한국 안에서는 기상청(KMA) 모델 값을 우선 쓰고, 비어 있는 값(모델 범위를 넘는 날짜,
-// 강수 확률 등)은 기본(best match) 예보로 채운다.
-const isKorea = (p) => p.latitude >= 33 && p.latitude <= 38.7 && p.longitude >= 124.5 && p.longitude <= 131;
-
-function preferFirst(primary, fallback) {
-  if (!primary) return fallback;
-  for (const section of ["daily", "hourly"]) {
-    const a = primary[section];
-    const b = fallback[section];
-    if (!a || !b) continue;
-    const index = new Map(a.time.map((t, i) => [t, i]));
-    for (const key of Object.keys(b)) {
-      if (key === "time") continue;
-      b[key] = b[key].map((v, i) => {
-        const j = index.get(b.time[i]);
-        const pv = j == null || !a[key] ? null : a[key][j];
-        return pv ?? v;
-      });
-    }
-  }
-  if (primary.current && fallback.current) {
-    for (const [k, v] of Object.entries(primary.current)) if (v != null) fallback.current[k] = v;
-  }
-  return fallback;
-}
-
 async function shortForecast(place) {
-  const params = {
+  const data = await getJSON(FORECAST_URL, {
     latitude: place.latitude,
     longitude: place.longitude,
     current: "temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m",
@@ -110,19 +86,7 @@ async function shortForecast(place) {
     forecast_days: SHORT_DAYS,
     wind_speed_unit: "ms",
     timezone: "auto",
-  };
-  const [base, kma] = await Promise.allSettled([
-    getJSON(FORECAST_URL, params),
-    isKorea(place) ? getJSON(FORECAST_URL, { ...params, models: "kma_seamless" }) : Promise.reject(new Error("국외")),
-  ]);
-  if (base.status === "rejected") throw base.reason;
-  if (kma.status === "rejected" && isKorea(place)) console.warn("기상청 모델 실패:", kma.reason);
-  // KMA 요청이 성공해도 지역에 따라 값이 전부 비어 있을 수 있어서, 실제 값이 있을 때만 사용
-  const kmaData = kma.status === "fulfilled" ? kma.value : null;
-  const kmaHasData = !!kmaData?.daily?.temperature_2m_max?.some((v) => v != null);
-  const data = preferFirst(kmaHasData ? kmaData : null, base.value);
-  data.usedKMA = kmaHasData;
-
+  });
   const d = data.daily;
   const h = data.hourly;
   const hourly = h.time.map((time, i) => ({
@@ -147,7 +111,73 @@ async function shortForecast(place) {
     hourly: hourly.filter((x) => x.time.startsWith(date)),
   })).filter((x) => x.tmax != null && x.tmin != null);
 
-  return { days, current: data.current, hourly, usedKMA: data.usedKMA };
+  return { days, current: data.current, hourly };
+}
+
+// ---- 2-1) 기상청 단기예보 (한국, 약 3일) — 프록시가 설정된 경우에만 ----
+const isKorea = (p) => p.latitude >= 33 && p.latitude <= 38.7 && p.longitude >= 124.5 && p.longitude <= 131;
+
+async function kmaForecast(place) {
+  if (!KMA_PROXY_URL || !isKorea(place)) return null;
+  return getJSON(KMA_PROXY_URL, { lat: place.latitude, lon: place.longitude });
+}
+
+// 기상청 하늘상태(SKY)·강수형태(PTY) → [아이콘, 설명]
+function kmaLabel(sky, pty) {
+  if (pty === 1) return ["🌧️", "비"];
+  if (pty === 2) return ["🌨️", "비/눈"];
+  if (pty === 3) return ["❄️", "눈"];
+  if (pty === 4) return ["🌦️", "소나기"];
+  if (sky === 1) return ["☀️", "맑음"];
+  if (sky === 3) return ["⛅", "구름많음"];
+  if (sky === 4) return ["☁️", "흐림"];
+  return null;
+}
+
+// 기상청 값이 있는 날짜는 기온·하늘·강수를 기상청 값으로 바꾸고,
+// 바람·자외선·일출/일몰 등 기상청 단기예보에 없는 값은 Open-Meteo 값을 그대로 둔다.
+function applyKMA(short, kma) {
+  if (!kma || !kma.days) return false;
+  const kmaDays = new Map(kma.days.map((d) => [d.date, d]));
+  let used = false;
+  for (const day of short.days) {
+    const k = kmaDays.get(day.date);
+    if (!k || k.tmin == null || k.tmax == null) continue; // 하루치가 다 없는 날은 Open-Meteo 유지
+    used = true;
+    Object.assign(day, {
+      src: "kma",
+      tmin: k.tmin,
+      tmax: k.tmax,
+      rainChance: k.pop == null ? day.rainChance : k.pop / 100,
+      precip: k.pcp,
+      label: kmaLabel(k.sky, k.pty) || undefined,
+      hourly: kma.hourly
+        .filter((h) => h.time.startsWith(day.date))
+        .map((h) => ({ time: h.time, temp: h.temp, rain: h.pop, label: kmaLabel(h.sky, h.pty) })),
+    });
+  }
+  if (!used) return false;
+
+  // 시간별(오늘 탭): 기상청 시간대는 기상청 값으로, 그 뒤는 Open-Meteo 값으로
+  const kmaHours = new Map(kma.hourly.map((h) => [h.time, h]));
+  short.hourly = short.hourly.map((x) => {
+    const h = kmaHours.get(x.time);
+    return h ? { time: x.time, temp: h.temp, rain: h.pop, label: kmaLabel(h.sky, h.pty) } : x;
+  });
+
+  // 현재 날씨: 기상청 실황 관측값
+  const c = kma.current;
+  if (c && short.current && c.temp != null) {
+    const nowHour = kma.hourly.find((h) => h.time.slice(0, 13) >= c.time.slice(0, 13));
+    Object.assign(short.current, {
+      temperature_2m: c.temp,
+      apparent_temperature: null, // 기상청 실황에는 체감온도가 없어 섞어 보여주지 않음
+      relative_humidity_2m: c.reh ?? short.current.relative_humidity_2m,
+      wind_speed_10m: c.wsd ?? short.current.wind_speed_10m,
+      label: kmaLabel(nowHour?.sky, c.pty) || undefined,
+    });
+  }
+  return true;
 }
 
 // ---- 3) 장기 예측: 계절 예측(앙상블) ----
@@ -247,6 +277,7 @@ function describeCode(code) {
 const isPrecipCode = (c) => (c >= 51 && c <= 67) || (c >= 71 && c <= 77) || (c >= 80 && c <= 86);
 
 function describe(day) {
+  if (day.label) return day.label;
   if (day.code != null) {
     if (isPrecipCode(day.code) && (day.precip ?? 0) < 1 && (day.rainChance ?? 0) < 0.5) {
       return (day.precip ?? 0) > 0 ? ["☁️", "흐림, 빗방울 가능"] : ["☁️", "흐림"];
@@ -313,7 +344,7 @@ function hourlyStrip(items) {
   return items.map((x) => `
     <div class="h">
       <div class="t">${Number(x.time.slice(11, 13))}시</div>
-      <div class="i">${(describeCode(x.code) || ["·"])[0]}</div>
+      <div class="i">${(x.label || describeCode(x.code) || ["·"])[0]}</div>
       <div class="v">${fmtT(x.temp)}</div>
       <div class="p">${x.rain ? `${x.rain}%` : ""}</div>
     </div>`).join("");
@@ -327,13 +358,13 @@ function renderToday(today, current, hourly) {
     $("hourly").innerHTML = "";
     return;
   }
-  const [icon, desc] = describeCode(current.weather_code) || describe(today);
+  const [icon, desc] = current.label || describeCode(current.weather_code) || describe(today);
   $("now").innerHTML = `
     <div class="big-icon">${icon}</div>
     <div>
       <div class="temp">${fmtT(current.temperature_2m)}</div>
       <div class="desc">${desc}</div>
-      <div class="meta">체감 ${fmtT(current.apparent_temperature)} · <span class="hi">최고 ${fmtT(today.tmax)}</span> / <span class="lo">최저 ${fmtT(today.tmin)}</span></div>
+      <div class="meta">${current.apparent_temperature == null ? "" : `체감 ${fmtT(current.apparent_temperature)} · `}<span class="hi">최고 ${fmtT(today.tmax)}</span> / <span class="lo">최저 ${fmtT(today.tmin)}</span></div>
     </div>`;
 
   const stat = (label, value) => `<div><span class="label">${label}</span><span class="value">${value}</span></div>`;
@@ -405,6 +436,7 @@ $("calendar").addEventListener("click", (e) => {
 
 // ---- 상세 ----
 const KIND_BADGE = {
+  kma: `<span class="badge">기상청 단기예보</span>`,
   short: `<span class="badge">일기예보</span>`,
   long: `<span class="badge warn">장기 예측 · 정확도 낮음</span>`,
   normal: `<span class="badge warn">평년값 (과거 10년 평균)</span>`,
@@ -436,7 +468,7 @@ function openDetail(d, i) {
 
   $("detail-body").innerHTML = `
     <h3>${formatKo(d.date)} (${w})</h3>
-    <div>${KIND_BADGE[d.kind]} <span class="source">${when}</span></div>
+    <div>${KIND_BADGE[d.src || d.kind]} <span class="source">${when}</span></div>
     <div class="hero"><span class="big-icon">${icon}</span><span class="desc">${desc}</span></div>
     <dl>${rows.join("")}</dl>
     ${threeHourly.length ? `<h3 style="margin-top:16px;font-size:1rem">시간별</h3><div class="hourly">${hourlyStrip(threeHourly)}</div>` : ""}
@@ -454,11 +486,12 @@ async function loadForecast(place) {
   setStatus(`${placeLabel(place)}의 날씨를 불러오는 중…`);
 
   let short = { days: [], current: null, hourly: [] };
-  try {
-    short = await shortForecast(place);
-  } catch (e) {
-    console.warn("단기 예보 실패:", e);
-  }
+  const [om, kma] = await Promise.allSettled([shortForecast(place), kmaForecast(place)]);
+  if (om.status === "fulfilled") short = om.value;
+  else console.warn("단기 예보 실패:", om.reason);
+  if (kma.status === "rejected") console.warn("기상청 예보 실패:", kma.reason);
+  const usedKMA = kma.status === "fulfilled" && applyKMA(short, kma.value);
+  const kmaFailed = !!KMA_PROXY_URL && isKorea(place) && !usedKMA;
   const sd = short.days;
   const start = sd.length ? sd[0].date : todayISO();
   const end = addDays(start, TOTAL_DAYS - 1);
@@ -484,7 +517,8 @@ async function loadForecast(place) {
 
   $("place-name").textContent = placeLabel(place);
   $("source").textContent = `${formatKo(days[0].date)} ~ ${formatKo(days[days.length - 1].date)}`
-    + (short.usedKMA ? " · 기상청(KMA) 모델 기반" : "");
+    + (usedKMA ? " · 3일까지 기상청 단기예보" : "")
+    + (kmaFailed ? " · 기상청 예보를 불러오지 못해 Open-Meteo로 표시" : "");
   renderToday(sd[0], short.current, short.hourly);
   renderMonth(days);
   selectTab(short.current ? "today" : "month");
