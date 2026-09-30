@@ -7,6 +7,16 @@
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/sun-typeface/SUIT@2/fonts/variable/woff2/SUIT-Variable.css">
 <link rel="stylesheet" href="style.css">
+<script>
+  // 글씨체 미리보기: 주소 끝에 ?font=spoqa 를 붙이면 Spoqa Han Sans Neo로 보여줌
+  if (new URLSearchParams(location.search).get("font") === "spoqa") {
+    const l = document.createElement("link");
+    l.rel = "stylesheet";
+    l.href = "https://cdn.jsdelivr.net/gh/spoqa/spoqa-han-sans@latest/css/SpoqaHanSansNeo.css";
+    document.head.appendChild(l);
+    document.documentElement.classList.add("font-spoqa");
+  }
+</script>
 </head>
 <body>
 <main>
