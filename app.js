@@ -117,8 +117,11 @@ async function shortForecast(place) {
   ]);
   if (base.status === "rejected") throw base.reason;
   if (kma.status === "rejected" && isKorea(place)) console.warn("기상청 모델 실패:", kma.reason);
-  const data = preferFirst(kma.status === "fulfilled" ? kma.value : null, base.value);
-  data.usedKMA = kma.status === "fulfilled";
+  // KMA 요청이 성공해도 지역에 따라 값이 전부 비어 있을 수 있어서, 실제 값이 있을 때만 사용
+  const kmaData = kma.status === "fulfilled" ? kma.value : null;
+  const kmaHasData = !!kmaData?.daily?.temperature_2m_max?.some((v) => v != null);
+  const data = preferFirst(kmaHasData ? kmaData : null, base.value);
+  data.usedKMA = kmaHasData;
 
   const d = data.daily;
   const h = data.hourly;
@@ -260,6 +263,7 @@ function describe(day) {
   return ["☀️", "대체로 맑음"];
 }
 
+const isRainy = (d) => /비|눈|소나기|뇌우/.test(describe(d)[1]) && !/빗방울 가능/.test(describe(d)[1]);
 const fmtT = (t) => (t == null ? "-" : `${Math.round(t)}°`);
 const fmtPct = (c) => (c == null ? "-" : `${Math.round(c * 100)}%`);
 const fmtMM = (p) => (p == null ? "-" : `${p.toFixed(1)}mm`);
@@ -353,7 +357,7 @@ let monthDays = [];
 
 function renderMonth(days) {
   monthDays = days;
-  const rainyDays = days.filter((d) => (d.rainChance ?? 0) >= 0.5 || (d.precip ?? 0) >= 5).length;
+  const rainyDays = days.filter(isRainy).length;
   const box = (label, value, cls = "") => `<div><span class="label">${label}</span><span class="value ${cls}">${value}</span></div>`;
   $("summary").innerHTML = [
     box("평균 최고", fmtT(mean(days.map((d) => d.tmax))), "hi"),
@@ -380,7 +384,8 @@ function renderMonth(days) {
     const dow = dt.getUTCDay();
     const showMonth = i === 0 || dom === 1;
     const [ic] = describe(d);
-    const rain = (d.rainChance ?? 0) >= 0.3 ? fmtPct(d.rainChance) : "";
+    // 강수량이 거의 없는 날은 확률만 높게 나와도 비가 오는 것처럼 보여서, 비 아이콘인 날만 표시
+    const rain = isRainy(d) ? fmtPct(d.rainChance) : "";
     html += `
       <button type="button" class="cell ${d.kind} ${i === 0 ? "today" : ""}" data-i="${i}"
         aria-label="${formatKo(date)} ${describe(d)[1]}, 최고 ${fmtT(d.tmax)} 최저 ${fmtT(d.tmin)}">
