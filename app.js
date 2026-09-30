@@ -1,4 +1,4 @@
-// 오늘부터 한 달 뒤까지 날씨 — Open-Meteo API (API 키 불필요)
+// 오늘 날씨 + 한 달 달력 — Open-Meteo API (API 키 불필요)
 const GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search";
 const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"; // 한글 지명 검색 대체용
 const FORECAST_URL = "https://api.open-meteo.com/v1/forecast";
@@ -72,17 +72,29 @@ async function searchNominatim(q) {
   });
 }
 
-// ---- 2) 단기 예보 (오늘 ~ 16일) ----
+// ---- 2) 단기 예보 (오늘 ~ 15일 뒤) + 현재 날씨 + 시간별 ----
 async function shortForecast(place) {
   const data = await getJSON(FORECAST_URL, {
     latitude: place.latitude,
     longitude: place.longitude,
-    daily: ["weather_code", ...DAILY_VARS, "precipitation_probability_max"].join(","),
+    current: "temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m",
+    hourly: "temperature_2m,weather_code,precipitation_probability",
+    daily: ["weather_code", ...DAILY_VARS, "precipitation_probability_max",
+      "wind_speed_10m_max", "uv_index_max", "sunrise", "sunset"].join(","),
     forecast_days: SHORT_DAYS,
+    wind_speed_unit: "ms",
     timezone: "auto",
   });
   const d = data.daily;
-  return d.time.map((date, i) => ({
+  const h = data.hourly;
+  const hourly = h.time.map((time, i) => ({
+    time,
+    temp: h.temperature_2m[i],
+    code: h.weather_code[i],
+    rain: h.precipitation_probability[i],
+  })).filter((x) => x.temp != null);
+
+  const days = d.time.map((date, i) => ({
     date,
     kind: "short",
     code: d.weather_code[i],
@@ -90,7 +102,14 @@ async function shortForecast(place) {
     tmin: d.temperature_2m_min[i],
     precip: d.precipitation_sum[i],
     rainChance: d.precipitation_probability_max[i] == null ? null : d.precipitation_probability_max[i] / 100,
+    wind: d.wind_speed_10m_max[i],
+    uv: d.uv_index_max[i],
+    sunrise: d.sunrise[i],
+    sunset: d.sunset[i],
+    hourly: hourly.filter((x) => x.time.startsWith(date)),
   })).filter((x) => x.tmax != null && x.tmin != null);
+
+  return { days, current: data.current, hourly };
 }
 
 // ---- 3) 장기 예측: 계절 예측(앙상블) ----
@@ -199,14 +218,13 @@ function describe(day) {
   return ["☀️", "대체로 맑음"];
 }
 
-const fmtT = (t) => `${Math.round(t)}°`;
-const fmtRain = (d) => {
-  const pct = d.rainChance == null ? "" : `${Math.round(d.rainChance * 100)}%`;
-  const mm = d.precip == null || d.precip < 0.1 ? "" : `<small>${d.precip.toFixed(1)}mm</small>`;
-  return [pct, mm].filter(Boolean).join(" ") || "-";
-};
+const fmtT = (t) => (t == null ? "-" : `${Math.round(t)}°`);
+const fmtPct = (c) => (c == null ? "-" : `${Math.round(c * 100)}%`);
+const fmtMM = (p) => (p == null ? "-" : `${p.toFixed(1)}mm`);
+const fmtClock = (iso) => (iso ? iso.slice(11, 16) : "-");
+const uvLevel = (uv) => (uv == null ? "" : uv < 3 ? "낮음" : uv < 6 ? "보통" : uv < 8 ? "높음" : uv < 11 ? "매우 높음" : "위험");
 
-// ---- 화면 ----
+// ---- 화면 공통 ----
 function setStatus(msg, isError = false) {
   $("status").textContent = msg;
   $("status").classList.toggle("error", isError);
@@ -214,6 +232,10 @@ function setStatus(msg, isError = false) {
 
 function placeLabel(p) {
   return [p.name, p.admin1, p.country].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(", ");
+}
+
+function escapeHTML(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
 function showResults(places) {
@@ -231,60 +253,169 @@ function showResults(places) {
   ul.hidden = places.length === 0;
 }
 
-function escapeHTML(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+// ---- 탭 ----
+function selectTab(name) {
+  for (const t of ["today", "month"]) {
+    $(`tab-${t}`).setAttribute("aria-selected", String(t === name));
+    $(`panel-${t}`).hidden = t !== name;
+  }
+}
+$("tab-today").addEventListener("click", () => selectTab("today"));
+$("tab-month").addEventListener("click", () => selectTab("month"));
+
+function hourlyStrip(items) {
+  return items.map((x) => `
+    <div class="h">
+      <div class="t">${Number(x.time.slice(11, 13))}시</div>
+      <div class="i">${(describeCode(x.code) || ["·"])[0]}</div>
+      <div class="v">${fmtT(x.temp)}</div>
+      <div class="p">${x.rain ? `${x.rain}%` : ""}</div>
+    </div>`).join("");
 }
 
-const LONG_LABEL = {
-  long: "여기부터 장기 예측 — ECMWF 계절 예측 앙상블 평균, 정확도 낮음",
-  normal: "여기부터 평년값 — 최근 10년 같은 날짜 평균 (장기 예측을 불러오지 못함)",
+// ---- 오늘 탭 ----
+function renderToday(today, current, hourly) {
+  if (!today || !current) {
+    $("now").innerHTML = `<div class="meta">오늘 날씨를 불러오지 못했습니다.</div>`;
+    $("today-stats").innerHTML = "";
+    $("hourly").innerHTML = "";
+    return;
+  }
+  const [icon, desc] = describeCode(current.weather_code) || describe(today);
+  $("now").innerHTML = `
+    <div class="big-icon">${icon}</div>
+    <div>
+      <div class="temp">${fmtT(current.temperature_2m)}</div>
+      <div class="desc">${desc}</div>
+      <div class="meta">체감 ${fmtT(current.apparent_temperature)} · <span class="hi">최고 ${fmtT(today.tmax)}</span> / <span class="lo">최저 ${fmtT(today.tmin)}</span></div>
+    </div>`;
+
+  const stat = (label, value) => `<div><span class="label">${label}</span><span class="value">${value}</span></div>`;
+  $("today-stats").innerHTML = [
+    stat("비 올 확률", fmtPct(today.rainChance)),
+    stat("습도", current.relative_humidity_2m == null ? "-" : `${current.relative_humidity_2m}%`),
+    stat("바람", current.wind_speed_10m == null ? "-" : `${current.wind_speed_10m.toFixed(1)}m/s`),
+    stat("자외선", today.uv == null ? "-" : `${Math.round(today.uv)} ${uvLevel(today.uv)}`),
+    stat("일출", fmtClock(today.sunrise)),
+    stat("일몰", fmtClock(today.sunset)),
+  ].join("");
+
+  // 현재 시각부터 24시간
+  const nowHour = current.time.slice(0, 13);
+  const from = Math.max(0, hourly.findIndex((x) => x.time.slice(0, 13) >= nowHour));
+  $("hourly").innerHTML = hourlyStrip(hourly.slice(from, from + 24));
+}
+
+// ---- 한 달 탭 (달력) ----
+let monthDays = [];
+
+function renderMonth(days) {
+  monthDays = days;
+  const rainyDays = days.filter((d) => (d.rainChance ?? 0) >= 0.5 || (d.precip ?? 0) >= 5).length;
+  const box = (label, value, cls = "") => `<div><span class="label">${label}</span><span class="value ${cls}">${value}</span></div>`;
+  $("summary").innerHTML = [
+    box("평균 최고", fmtT(mean(days.map((d) => d.tmax))), "hi"),
+    box("평균 최저", fmtT(mean(days.map((d) => d.tmin))), "lo"),
+    box("가장 더운 날", fmtT(Math.max(...days.map((d) => d.tmax))), "hi"),
+    box("가장 추운 날", fmtT(Math.min(...days.map((d) => d.tmin))), "lo"),
+    box("비·눈 예상일", `${rainyDays}일`),
+  ].join("");
+
+  // 첫날이 속한 주의 일요일부터 마지막 날이 속한 주의 토요일까지
+  const first = days[0].date;
+  const last = days[days.length - 1].date;
+  const gridStart = addDays(first, -parseISO(first).getUTCDay());
+  const gridEnd = addDays(last, 6 - parseISO(last).getUTCDay());
+  const byDate = new Map(days.map((d, i) => [d.date, i]));
+
+  let html = "";
+  for (let date = gridStart; date <= gridEnd; date = addDays(date, 1)) {
+    const i = byDate.get(date);
+    if (i == null) { html += `<div class="cell out"></div>`; continue; }
+    const d = days[i];
+    const dt = parseISO(date);
+    const dom = dt.getUTCDate();
+    const dow = dt.getUTCDay();
+    const showMonth = i === 0 || dom === 1;
+    const [ic] = describe(d);
+    const rain = (d.rainChance ?? 0) >= 0.3 ? fmtPct(d.rainChance) : "";
+    html += `
+      <button type="button" class="cell ${d.kind} ${i === 0 ? "today" : ""}" data-i="${i}"
+        aria-label="${formatKo(date)} ${describe(d)[1]}, 최고 ${fmtT(d.tmax)} 최저 ${fmtT(d.tmin)}">
+        <span class="d ${dow === 0 ? "sun" : dow === 6 ? "sat" : ""}">${showMonth ? `<span class="m">${dt.getUTCMonth() + 1}/</span>` : ""}${dom}</span>
+        <span class="i">${ic}</span>
+        <span class="tt"><span class="hi">${Math.round(d.tmax)}</span>/<span class="lo">${Math.round(d.tmin)}</span></span>
+        <span class="rp">${rain}</span>
+      </button>`;
+  }
+  $("calendar").innerHTML = html;
+}
+
+$("calendar").addEventListener("click", (e) => {
+  const cell = e.target.closest(".cell[data-i]");
+  if (cell) openDetail(monthDays[Number(cell.dataset.i)], Number(cell.dataset.i));
+});
+
+// ---- 상세 ----
+const KIND_BADGE = {
+  short: `<span class="badge">일기예보</span>`,
+  long: `<span class="badge warn">장기 예측 · 정확도 낮음</span>`,
+  normal: `<span class="badge warn">평년값 (과거 10년 평균)</span>`,
+};
+const KIND_NOTE = {
+  long: "2주 이후는 ECMWF 계절 예측 여러 개의 평균이에요. 날씨 경향만 참고하세요.",
+  normal: "장기 예측을 불러오지 못해 최근 10년 같은 날짜의 평균을 보여줘요.",
 };
 
-function render(place, days) {
-  $("place-name").textContent = placeLabel(place);
-  $("source").textContent = `${formatKo(days[0].date)} ~ ${formatKo(days[days.length - 1].date)} · ${days.length}일`;
+function openDetail(d, i) {
+  const [icon, desc] = describe(d);
+  const w = "일월화수목금토"[parseISO(d.date).getUTCDay()];
+  const when = i === 0 ? "오늘" : i === 1 ? "내일" : `${i}일 뒤`;
+  const row = (k, v) => `<dt>${k}</dt><dd>${v}</dd>`;
+  const rows = [
+    row("최고 기온", `<span class="hi">${fmtT(d.tmax)}</span>`),
+    row("최저 기온", `<span class="lo">${fmtT(d.tmin)}</span>`),
+    row("비 올 확률", fmtPct(d.rainChance)),
+    row(d.kind === "short" ? "강수량" : "예상 강수량", fmtMM(d.precip)),
+  ];
+  if (d.kind === "short") {
+    rows.push(
+      row("최대 풍속", d.wind == null ? "-" : `${d.wind.toFixed(1)}m/s`),
+      row("자외선", d.uv == null ? "-" : `${Math.round(d.uv)} ${uvLevel(d.uv)}`),
+      row("일출 / 일몰", `${fmtClock(d.sunrise)} / ${fmtClock(d.sunset)}`),
+    );
+  }
+  const threeHourly = (d.hourly || []).filter((x) => Number(x.time.slice(11, 13)) % 3 === 0);
 
-  const rainyDays = days.filter((d) => (d.rainChance ?? 0) >= 0.5 || (d.precip ?? 0) >= 5).length;
-  $("summary").innerHTML = `
-    <div><span class="label">평균 최고</span><span class="value hi">${fmtT(mean(days.map((d) => d.tmax)))}</span></div>
-    <div><span class="label">평균 최저</span><span class="value lo">${fmtT(mean(days.map((d) => d.tmin)))}</span></div>
-    <div><span class="label">가장 더운 날</span><span class="value hi">${fmtT(Math.max(...days.map((d) => d.tmax)))}</span></div>
-    <div><span class="label">가장 추운 날</span><span class="value lo">${fmtT(Math.min(...days.map((d) => d.tmin)))}</span></div>
-    <div><span class="label">비·눈 예상일</span><span class="value">${rainyDays}일</span></div>`;
-
-  let prevKind = null;
-  $("days").innerHTML = days.map((d, i) => {
-    let sep = "";
-    if (d.kind !== prevKind && d.kind !== "short") {
-      sep = `<tr class="sep"><td colspan="4">${LONG_LABEL[d.kind]}</td></tr>`;
-    }
-    prevKind = d.kind;
-    const [ic, ds] = describe(d);
-    const label = i === 0 ? "오늘" : i === 1 ? "내일" : formatShort(d.date);
-    return `${sep}<tr class="${d.kind}">
-      <td>${label}</td>
-      <td><span class="ic">${ic}</span> ${ds}</td>
-      <td><span class="hi">${fmtT(d.tmax)}</span> / <span class="lo">${fmtT(d.tmin)}</span></td>
-      <td>${fmtRain(d)}</td>
-    </tr>`;
-  }).join("");
-
-  $("forecast").hidden = false;
+  $("detail-body").innerHTML = `
+    <h3>${formatKo(d.date)} (${w})</h3>
+    <div>${KIND_BADGE[d.kind]} <span class="source">${when}</span></div>
+    <div class="hero"><span class="big-icon">${icon}</span><span class="desc">${desc}</span></div>
+    <dl>${rows.join("")}</dl>
+    ${threeHourly.length ? `<h3 style="margin-top:16px;font-size:1rem">시간별</h3><div class="hourly">${hourlyStrip(threeHourly)}</div>` : ""}
+    ${KIND_NOTE[d.kind] ? `<p class="note">${KIND_NOTE[d.kind]}</p>` : ""}`;
+  $("detail").showModal();
 }
 
+$("detail-close").addEventListener("click", () => $("detail").close());
+// 바깥(배경) 누르면 닫기
+$("detail").addEventListener("click", (e) => { if (e.target === $("detail")) $("detail").close(); });
+
+// ---- 불러오기 ----
 async function loadForecast(place) {
   $("forecast").hidden = true;
-  setStatus(`${placeLabel(place)}의 한 달 날씨를 불러오는 중…`);
+  setStatus(`${placeLabel(place)}의 날씨를 불러오는 중…`);
 
-  let short = [];
+  let short = { days: [], current: null, hourly: [] };
   try {
     short = await shortForecast(place);
   } catch (e) {
     console.warn("단기 예보 실패:", e);
   }
-  const start = short.length ? short[0].date : todayISO();
+  const sd = short.days;
+  const start = sd.length ? sd[0].date : todayISO();
   const end = addDays(start, TOTAL_DAYS - 1);
-  const longStart = short.length ? addDays(short[short.length - 1].date, 1) : start;
+  const longStart = sd.length ? addDays(sd[sd.length - 1].date, 1) : start;
 
   let long = [];
   try {
@@ -298,12 +429,18 @@ async function loadForecast(place) {
     }
   }
 
-  const days = [...short, ...long];
+  const days = [...sd, ...long];
   if (!days.length) {
     setStatus("날씨 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.", true);
     return;
   }
-  render(place, days);
+
+  $("place-name").textContent = placeLabel(place);
+  $("source").textContent = `${formatKo(days[0].date)} ~ ${formatKo(days[days.length - 1].date)}`;
+  renderToday(sd[0], short.current, short.hourly);
+  renderMonth(days);
+  selectTab(short.current ? "today" : "month");
+  $("forecast").hidden = false;
   setStatus(long.length ? "" : "16일 이후 장기 예측은 불러오지 못했습니다.", !long.length);
 }
 

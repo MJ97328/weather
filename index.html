@@ -9,7 +9,7 @@
 <body>
 <main>
   <h1>한 달 날씨</h1>
-  <p class="sub">장소를 검색하면 오늘부터 한 달 뒤까지 매일의 날씨를 보여줍니다.</p>
+  <p class="sub">장소를 검색하면 오늘 날씨와 한 달 뒤까지의 날씨를 보여줍니다.</p>
 
   <form id="search-form" autocomplete="off">
     <input id="query" type="search" placeholder="도시 또는 장소 (예: 서울, 부산, Tokyo)" required>
@@ -22,18 +22,37 @@
   <section id="forecast" hidden>
     <h2 id="place-name"></h2>
     <p id="source" class="source"></p>
-    <div id="summary" class="summary"></div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>날짜</th><th>날씨</th><th>최고 / 최저</th><th>비</th></tr></thead>
-        <tbody id="days"></tbody>
-      </table>
+
+    <div class="tabs" role="tablist">
+      <button type="button" role="tab" id="tab-today" aria-controls="panel-today" aria-selected="true">오늘</button>
+      <button type="button" role="tab" id="tab-month" aria-controls="panel-month" aria-selected="false">한 달</button>
+    </div>
+
+    <div id="panel-today" role="tabpanel" aria-labelledby="tab-today">
+      <div id="now" class="now"></div>
+      <div id="today-stats" class="stats"></div>
+      <h3>시간별 날씨</h3>
+      <div id="hourly" class="hourly"></div>
+    </div>
+
+    <div id="panel-month" role="tabpanel" aria-labelledby="tab-month" hidden>
+      <div id="summary" class="summary"></div>
+      <div class="calendar">
+        <div class="cal-head"><span class="sun">일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span class="sat">토</span></div>
+        <div id="calendar" class="cal-grid"></div>
+      </div>
+      <p class="legend"><span class="legend-box"></span> 점선 칸은 장기 예측이라 정확도가 낮아요. 날짜를 누르면 자세히 볼 수 있어요.</p>
     </div>
   </section>
 
+  <dialog id="detail" class="detail">
+    <button type="button" class="close" id="detail-close" aria-label="닫기">✕</button>
+    <div id="detail-body"></div>
+  </dialog>
+
   <footer>
     데이터: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>, 장소 검색 <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap</a>
-    (16일까지: 일반 예보 · 이후: ECMWF 계절 예측 앙상블 평균, 실패 시 과거 10년 평년값).
+    (15일 뒤까지: 일반 예보 · 이후: ECMWF 계절 예측 앙상블 평균, 실패 시 과거 10년 평년값).
     2주 이후 예측은 불확실성이 크므로 참고용으로만 사용하세요.
   </footer>
 </main>
