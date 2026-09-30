@@ -4,16 +4,22 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Weather</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300..700&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <main>
-  <h1>Weather</h1>
-  <p class="sub">장소를 검색하면 오늘 날씨와 한 달 뒤까지의 날씨를 보여줍니다.</p>
+  <header class="hero">
+    <h1>Weather.</h1>
+    <p class="sub">장소를 검색하면 오늘 날씨와 한 달 뒤까지의 날씨를 보여줍니다.</p>
+  </header>
 
   <form id="search-form" autocomplete="off">
     <input id="query" type="search" placeholder="도시 또는 장소 (예: 서울, 부산, Tokyo)" required>
-    <button type="submit">검색</button>
+    <button type="submit" class="btn-primary">검색</button>
   </form>
 
   <ul id="results" class="results" hidden></ul>
@@ -31,7 +37,7 @@
     <div id="panel-today" role="tabpanel" aria-labelledby="tab-today">
       <div id="now" class="now"></div>
       <div id="today-stats" class="stats"></div>
-      <h3>시간별 날씨</h3>
+      <h3>시간별 날씨.</h3>
       <div id="hourly" class="hourly"></div>
     </div>
 
@@ -49,13 +55,19 @@
     <button type="button" class="close" id="detail-close" aria-label="닫기">✕</button>
     <div id="detail-body"></div>
   </dialog>
-
-  <footer>
-    데이터: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>, 장소 검색 <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap</a>
-    (15일 뒤까지: 일반 예보 · 이후: ECMWF 계절 예측 앙상블 평균, 실패 시 과거 10년 평년값).
-    2주 이후 예측은 불확실성이 크므로 참고용으로만 사용하세요.
-  </footer>
 </main>
+
+<footer class="footer">
+  <div class="footer-inner">
+    <div class="wordmark">Weather.</div>
+    <p class="tagline">오늘부터 한 달 뒤까지, 매일의 날씨.</p>
+    <p>
+      데이터 <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> ·
+      장소 검색 <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap</a>
+    </p>
+    <p class="fine">15일 뒤까지는 일반 예보, 이후는 ECMWF 계절 예측 앙상블 평균(실패 시 과거 10년 평년값)입니다. 2주 이후 예측은 불확실성이 크므로 참고용으로만 사용하세요.</p>
+  </div>
+</footer>
 <script src="app.js"></script>
 </body>
 </html>
